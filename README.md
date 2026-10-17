@@ -23,51 +23,26 @@ Works with **Cursor Free** and **Cursor Pro** accounts, runs on **Bun** with zer
 ```bash
 git clone https://github.com/trfi/cursor-commit.git
 cd cursor-commit
+
+# Register `cursor-commit` as a global CLI command on your system
 bun link
-```
 
-Or configure global Git aliases directly:
-
-```bash
-# Print commit message for staged changes (with commit history context)
-git config --global alias.cc "!bun /path/to/cursor-commit/cursor-commit.js"
-
-# Generate commit message and commit staged changes immediately
-git config --global alias.ccc "!bun /path/to/cursor-commit/cursor-commit.js --commit"
-
-# Generate commit message and copy to clipboard
-git config --global alias.ccy "!bun /path/to/cursor-commit/cursor-commit.js --copy"
-
-# Print commit message without commit history (explicit_context + diff only)
-git config --global alias.ccn "!bun /path/to/cursor-commit/cursor-commit.js --no-history"
-
-# Commit staged changes without commit history (explicit_context + diff only)
-git config --global alias.cccn "!bun /path/to/cursor-commit/cursor-commit.js --no-history --commit"
-
-# Copy commit message without commit history (explicit_context + diff only)
-git config --global alias.ccyn "!bun /path/to/cursor-commit/cursor-commit.js --no-history --copy"
+# Automatically configure all global Git aliases (cc, ccc, ccy, ccn, cccn, ccyn)
+bun cursor-commit.js --setup-aliases
 ```
 
 ## Usage
 
 Stage your changes (`git add <files>`) and run:
 
-```bash
-# Print generated commit message to stdout
-git cc
-
-# Print generated commit message without previous_commit_messages
-git ccn
-
-# Generate commit message and run `git commit -m "<msg>"`
-git ccc
-
-# Generate commit message (no history) and run `git commit -m "<msg>"`
-git cccn
-
-# Generate commit message and copy to clipboard
-git ccy
-```
+| Git Alias | Description |
+| :--- | :--- |
+| `git cc` | Generate and print commit message to stdout |
+| `git ccc` | Generate commit message and run `git commit -m "<msg>"` |
+| `git ccy` | Generate commit message and copy to clipboard |
+| `git ccn` | Generate and print commit message without `previous_commit_messages` |
+| `git cccn` | Generate commit message (no history) and run `git commit -m "<msg>"` |
+| `git ccyn` | Generate commit message (no history) and copy to clipboard |
 
 ### CLI Options
 
@@ -78,6 +53,7 @@ git ccy
 | `-y`, `--copy` | Generate commit message and copy it to the system clipboard |
 | `-n`, `--no-history` | Do not send `previous_commit_messages` (send only `explicit_context` + `diffs`) |
 | `-a`, `--all` | Fallback to unstaged changes (`git diff HEAD`) if nothing is staged |
+| `--setup-aliases` | Configure all global Git aliases (`cc`, `ccc`, `ccy`, `ccn`, `cccn`, `ccyn`) |
 | `--hook <file>` | Prepend generated message into a commit message file (for `.git/hooks/prepare-commit-msg`) |
 | `-h`, `--help` | Show CLI usage |
 

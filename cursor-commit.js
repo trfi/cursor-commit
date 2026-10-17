@@ -335,6 +335,28 @@ function copyToClipboard(text) {
   return false;
 }
 
+function setupGitAliases() {
+  const bunPath = process.execPath.replace(/\\/g, "/");
+  const scriptPath = path.resolve(import.meta.filename).replace(/\\/g, "/");
+  const baseCmd = `!"${bunPath}" "${scriptPath}"`;
+  const aliases = {
+    cc: baseCmd,
+    ccc: `${baseCmd} --commit`,
+    ccy: `${baseCmd} --copy`,
+    ccn: `${baseCmd} --no-history`,
+    cccn: `${baseCmd} --no-history --commit`,
+    ccyn: `${baseCmd} --no-history --copy`,
+  };
+
+  for (const [name, cmd] of Object.entries(aliases)) {
+    const proc = Bun.spawnSync(["git", "config", "--global", `alias.${name}`, cmd]);
+    if (proc.exitCode !== 0) {
+      throw new Error(`Failed to configure git alias.${name}`);
+    }
+    console.log(`Configured: git ${name}`);
+  }
+}
+
 function printHelp() {
   console.log(`cursor-commit - Generate Git commit messages using Cursor's native AI without opening Cursor
 
@@ -342,18 +364,24 @@ Usage:
   bun cursor-commit.js [options]
 
 Options:
-  -c, --commit       Generate message from staged changes and run \`git commit -m "<msg>"\`
-  -y, --copy         Generate message and copy it to the system clipboard
-  -n, --no-history   Do not send previous commit messages (only send explicit_context + diff)
-  -a, --all          Fallback to unstaged changes if no changes are staged
-  --hook <file>      Prepend generated message to a commit message file (for prepare-commit-msg hook)
-  -h, --help         Show this help message`);
+  -c, --commit         Generate message from staged changes and run \`git commit -m "<msg>"\`
+  -y, --copy           Generate message and copy it to the system clipboard
+  -n, --no-history     Do not send previous commit messages (only send explicit_context + diff)
+  -a, --all            Fallback to unstaged changes if no changes are staged
+  --setup-aliases      Configure all global Git aliases (cc, ccc, ccy, ccn, cccn, ccyn)
+  --hook <file>        Prepend generated message to a commit message file (for prepare-commit-msg hook)
+  -h, --help           Show this help message`);
 }
 
 async function main() {
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) {
     printHelp();
+    return;
+  }
+
+  if (args.includes("--setup-aliases")) {
+    setupGitAliases();
     return;
   }
 
