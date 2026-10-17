@@ -224,25 +224,6 @@ function splitDiffByFile(rawDiff) {
   return parts.length > 0 ? parts : [rawDiff];
 }
 
-function cleanCommitExample(msg) {
-  return msg
-    .split(/\r?\n/)
-    .filter((line) => !/^-\s*(updated|improved|added|enhanced)\s+documentation\b/i.test(line.trim()))
-    .map((line) =>
-      line
-        .replace(/^(\s*-\s*)Updated\b/, "$1Update")
-        .replace(/^(\s*-\s*)Introduced\b/, "$1Introduce")
-        .replace(/^(\s*-\s*)Enhanced\b/, "$1Update")
-        .replace(/^(\s*-\s*)Improved\b/, "$1Refine")
-        .replace(/^(\s*-\s*)Added\b/, "$1Add")
-        .replace(/^(\s*-\s*)Removed\b/, "$1Remove")
-        .replace(/^(\s*-\s*)Modified\b/, "$1Modify")
-        .replace(/^(\s*-\s*)Adjusted\b/, "$1Adjust")
-    )
-    .join("\n")
-    .trim();
-}
-
 function getGitContext({ includeUnstagedFallback = false, noHistory = false } = {}) {
   let rawDiff = runGit(["diff", "--cached", "--patch"]);
 
@@ -270,29 +251,11 @@ function getGitContext({ includeUnstagedFallback = false, noHistory = false } = 
   const previousCommitMessages = logOutput
     ? logOutput
         .split("\0")
-        .map((s) => cleanCommitExample(s))
+        .map((s) => s.trim())
         .filter(Boolean)
     : [];
 
   return { diffs, previousCommitMessages };
-}
-
-function postProcessCommitMessage(msg) {
-  const lines = msg.split(/\r?\n/);
-  const bulletLines = lines.filter((l) => /^\s*-\s+/.test(l));
-  const isDocFiller = (line) =>
-    /^\s*-\s*(?:update|updated|enhance|enhanced|improve|improved|add|added|refine|refined)\s+(?:the\s+)?documentation\s+to\s+(?:reflect|clarify|document)\b/i.test(
-      line
-    );
-
-  // Only prune generic "Updated documentation to reflect..." filler if there are other substantive bullets
-  if (bulletLines.length > 1) {
-    return lines
-      .filter((l) => !isDocFiller(l))
-      .join("\n")
-      .trim();
-  }
-  return msg.trim();
 }
 
 async function generateCommitMessage(options = {}) {
@@ -345,7 +308,7 @@ async function generateCommitMessage(options = {}) {
     throw new Error(`Cursor API error (${res.status}): ${resBuf.toString("utf8")}`);
   }
 
-  const commitMessage = postProcessCommitMessage(decodeWriteGitCommitMessageResponse(resBuf));
+  const commitMessage = decodeWriteGitCommitMessageResponse(resBuf).trim();
   if (!commitMessage) {
     throw new Error("Cursor API returned an empty commit message.");
   }

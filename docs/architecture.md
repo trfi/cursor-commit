@@ -9,7 +9,7 @@ Cursor's "Generate Commit Message" button (`cursor.generateGitCommitMessage`) ca
 - **Production Commit Best-Practice Enforcement**:
   - Injects `aiserver.v1.ExplicitContext` (field `3`) instructing the model to use imperative mood, focus on technical *Why* over trivial *What*, and omit documentation filler.
   - Supports `--no-history` (`-n`) to omit `previous_commit_messages` completely and generate the commit message purely from `explicit_context` + `diffs`.
-  - When history is enabled (default), sanitizes the 10 `previous_commit_messages` (`git log -n 10 --pretty=format:%B%x00`) by normalizing past-tense bullet verbs into imperative mood and stripping generic `"Updated documentation..."` lines so historical commits do not bias the few-shot prompt toward anti-patterns.
+  - When history is enabled (default), sends the full raw body (`git log -n 10 --pretty=format:%B%x00`) of the last 10 commits in `previous_commit_messages`.
 - **Offline Token Longevity**: Reads `cursorAuth/accessToken` and `cursorAuth/refreshToken` from Cursor's local `state.vscdb`. When the access token expires while Cursor is closed, the script refreshes it via `https://api2.cursor.sh/oauth/token` and persists the new token back to `state.vscdb`.
 - **Client Checksum**: Generates `x-cursor-checksum` from the current timestamp (obfuscated with rolling XOR seed `165`) and the local `telemetry.machineId` / `telemetry.macMachineId` from `storage.json`.
 
