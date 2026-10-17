@@ -1,0 +1,22 @@
+{
+  "name": "cursor-commit",
+  "version": "1.0.0",
+  "description": "Standalone Bun CLI to generate Git commit messages using Cursor's native AI without opening the Cursor IDE.",
+  "type": "module",
+  "bin": {
+    "cursor-commit": "./cursor-commit.js"
+  },
+  "scripts": {
+    "start": "bun cursor-commit.js"
+  },
+  "keywords": [
+    "cursor",
+    "git",
+    "commit",
+    "ai",
+    "cli",
+    "bun"
+  ],
+  "author": "trfi",
+  "license": "MIT"
+}

@@ -1,0 +1,356 @@
+#!/usr/bin/env bun
+/**
+ * cursor-commit.js
+ * Standalone Bun CLI utility that calls Cursor's internal WriteGitCommitMessage API
+ * (aiserver.v1.AiService/WriteGitCommitMessage) without opening the Cursor IDE.
+ */
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import crypto from "node:crypto";
+import { Database } from "bun:sqlite";
+
+const CURSOR_CLIENT_ID = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB";
+const CURSOR_API_BASE = "https://api2.cursor.sh";
+
+function getPaths() {
+  const home = os.homedir();
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA || path.join(home, "AppData", "Roaming");
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+    return {
+      dbPath: path.join(appData, "Cursor", "User", "globalStorage", "state.vscdb"),
+      storagePath: path.join(appData, "Cursor", "User", "globalStorage", "storage.json"),
+      productPath: path.join(localAppData, "Programs", "cursor", "resources", "app", "product.json"),
+    };
+  }
+  if (process.platform === "darwin") {
+    const appSupport = path.join(home, "Library", "Application Support", "Cursor", "User", "globalStorage");
+    return {
+      dbPath: path.join(appSupport, "state.vscdb"),
+      storagePath: path.join(appSupport, "storage.json"),
+      productPath: "/Applications/Cursor.app/Contents/Resources/app/product.json",
+    };
+  }
+  const configDir = path.join(process.env.XDG_CONFIG_HOME || path.join(home, ".config"), "Cursor", "User", "globalStorage");
+  return {
+    dbPath: path.join(configDir, "state.vscdb"),
+    storagePath: path.join(configDir, "storage.json"),
+    productPath: "/usr/share/cursor/resources/app/product.json",
+  };
+}
+
+function getCursorChecksum(machineId, macMachineId) {
+  const x = Math.floor(Date.now() / 1e6);
+  const bytes = new Uint8Array([
+    (x >> 40) & 255,
+    (x >> 32) & 255,
+    (x >> 24) & 255,
+    (x >> 16) & 255,
+    (x >> 8) & 255,
+    x & 255,
+  ]);
+  let t = 165;
+  for (let n = 0; n < bytes.length; n++) {
+    bytes[n] = ((bytes[n] ^ t) + (n % 256)) & 255;
+    t = bytes[n];
+  }
+  const encoded = Buffer.from(bytes).toString("base64url");
+  return macMachineId ? `${encoded}${machineId}/${macMachineId}` : `${encoded}${machineId}`;
+}
+
+function decodeJwtExp(token) {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8"));
+    return payload.exp ? payload.exp * 1000 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function getValidAccessToken(dbPath) {
+  if (!fs.existsSync(dbPath)) {
+    throw new Error(`Cursor database not found at: ${dbPath}`);
+  }
+
+  const db = new Database(dbPath, { readonly: true });
+  const getVal = (key) => {
+    const row = db.query("SELECT value FROM ItemTable WHERE key = ?").get(key);
+    return row ? row.value : undefined;
+  };
+  let accessToken = getVal("cursorAuth/accessToken");
+  const refreshToken = getVal("cursorAuth/refreshToken");
+  db.close();
+
+  if (!accessToken && !refreshToken) {
+    throw new Error("No Cursor login session found in state.vscdb. Please sign in to Cursor once.");
+  }
+
+  const exp = decodeJwtExp(accessToken);
+  if (!accessToken || Date.now() + 5 * 60 * 1000 > exp) {
+    const res = await fetch(`${CURSOR_API_BASE}/oauth/token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-cursor-client-type": "ide",
+      },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        client_id: CURSOR_CLIENT_ID,
+        refresh_token: refreshToken,
+      }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Failed to refresh Access Token (${res.status}): ${await res.text()}`);
+    }
+
+    const data = await res.json();
+    if (!data.access_token) {
+      throw new Error("Invalid token refresh response from Cursor API.");
+    }
+    accessToken = data.access_token;
+
+    try {
+      const writeDb = new Database(dbPath);
+      writeDb
+        .query("UPDATE ItemTable SET value = ? WHERE key = 'cursorAuth/accessToken'")
+        .run(accessToken);
+      writeDb.close();
+    } catch {
+      // Ignore if Cursor IDE currently holds a write lock on state.vscdb
+    }
+  }
+
+  return accessToken;
+}
+
+function encodeVarint(val) {
+  const bytes = [];
+  while (val > 0x7f) {
+    bytes.push((val & 0x7f) | 0x80);
+    val >>>= 7;
+  }
+  bytes.push(val & 0x7f);
+  return Buffer.from(bytes);
+}
+
+function encodeStringField(fieldNo, str) {
+  const strBuf = Buffer.from(str, "utf8");
+  const tag = encodeVarint((fieldNo << 3) | 2);
+  const len = encodeVarint(strBuf.length);
+  return Buffer.concat([tag, len, strBuf]);
+}
+
+function encodeWriteGitCommitMessageRequest(diffs, previousCommitMessages) {
+  const chunks = [];
+  for (const d of diffs) {
+    chunks.push(encodeStringField(1, d));
+  }
+  for (const m of previousCommitMessages) {
+    chunks.push(encodeStringField(2, m));
+  }
+  return Buffer.concat(chunks);
+}
+
+function decodeWriteGitCommitMessageResponse(buf) {
+  let offset = 0;
+  while (offset < buf.length) {
+    let tag = 0;
+    let shift = 0;
+    while (offset < buf.length) {
+      const b = buf[offset++];
+      tag |= (b & 0x7f) << shift;
+      if ((b & 0x80) === 0) break;
+      shift += 7;
+    }
+    const fieldNo = tag >>> 3;
+    const wireType = tag & 7;
+    if (wireType === 2) {
+      let len = 0;
+      shift = 0;
+      while (offset < buf.length) {
+        const b = buf[offset++];
+        len |= (b & 0x7f) << shift;
+        if ((b & 0x80) === 0) break;
+        shift += 7;
+      }
+      const val = buf.subarray(offset, offset + len);
+      offset += len;
+      if (fieldNo === 1) {
+        return val.toString("utf8");
+      }
+    } else {
+      break;
+    }
+  }
+  return "";
+}
+
+function runGit(args) {
+  const proc = Bun.spawnSync(["git", ...args], {
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  if (proc.exitCode !== 0) return "";
+  return proc.stdout.toString("utf8").trim();
+}
+
+function getGitContext(includeUnstagedFallback = false) {
+  let diff = runGit(["diff", "--cached", "--patch"]);
+
+  if (!diff && includeUnstagedFallback) {
+    diff = runGit(["diff", "HEAD", "--patch"]) || runGit(["diff", "--patch"]);
+  }
+
+  if (!diff) {
+    throw new Error(
+      "No staged changes found (run `git add` first, or pass `--all` to include unstaged changes)."
+    );
+  }
+
+  const MAX_DIFF_CHARS = 120000;
+  if (diff.length > MAX_DIFF_CHARS) {
+    diff = diff.slice(0, MAX_DIFF_CHARS) + "\n... [diff truncated]";
+  }
+
+  const logOutput = runGit(["log", "-n", "10", "--pretty=format:%s"]);
+  const previousCommitMessages = logOutput
+    ? logOutput.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  return { diffs: [diff], previousCommitMessages };
+}
+
+async function generateCommitMessage(includeUnstagedFallback = false) {
+  const { dbPath, storagePath, productPath } = getPaths();
+  const { diffs, previousCommitMessages } = getGitContext(includeUnstagedFallback);
+
+  let machineId = crypto.randomUUID();
+  let macMachineId = undefined;
+  if (fs.existsSync(storagePath)) {
+    const storage = JSON.parse(fs.readFileSync(storagePath, "utf8"));
+    machineId = storage["telemetry.machineId"] || machineId;
+    macMachineId = storage["telemetry.macMachineId"];
+  }
+
+  let clientVersion = "3.22.7";
+  if (fs.existsSync(productPath)) {
+    const product = JSON.parse(fs.readFileSync(productPath, "utf8"));
+    clientVersion = product.version || clientVersion;
+  }
+
+  const accessToken = await getValidAccessToken(dbPath);
+  const checksum = getCursorChecksum(machineId, macMachineId);
+  const body = encodeWriteGitCommitMessageRequest(diffs, previousCommitMessages);
+
+  const res = await fetch(`${CURSOR_API_BASE}/aiserver.v1.AiService/WriteGitCommitMessage`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Content-Type": "application/proto",
+      "Connect-Protocol-Version": "1",
+      "x-cursor-checksum": checksum,
+      "x-cursor-client-version": clientVersion,
+      "x-cursor-client-type": "ide",
+      "x-cursor-client-os": process.platform,
+      "x-cursor-client-arch": process.arch,
+      "x-cursor-client-device-type": "desktop",
+      "x-cursor-timezone": Intl.DateTimeFormat().resolvedOptions().timeZone,
+      "x-ghost-mode": "true",
+      "x-request-id": crypto.randomUUID(),
+    },
+    body,
+  });
+
+  const resBuf = Buffer.from(await res.arrayBuffer());
+  if (!res.ok) {
+    throw new Error(`Cursor API error (${res.status}): ${resBuf.toString("utf8")}`);
+  }
+
+  const commitMessage = decodeWriteGitCommitMessageResponse(resBuf).trim();
+  if (!commitMessage) {
+    throw new Error("Cursor API returned an empty commit message.");
+  }
+  return commitMessage;
+}
+
+function copyToClipboard(text) {
+  const input = Buffer.from(text, "utf8");
+  if (process.platform === "win32") {
+    return Bun.spawnSync(["clip"], { stdin: input }).exitCode === 0;
+  }
+  if (process.platform === "darwin") {
+    return Bun.spawnSync(["pbcopy"], { stdin: input }).exitCode === 0;
+  }
+  for (const cmd of [
+    ["wl-copy"],
+    ["xclip", "-selection", "clipboard"],
+    ["xsel", "--clipboard", "--input"],
+  ]) {
+    try {
+      if (Bun.spawnSync(cmd, { stdin: input }).exitCode === 0) return true;
+    } catch {}
+  }
+  return false;
+}
+
+function printHelp() {
+  console.log(`cursor-commit - Generate Git commit messages using Cursor's native AI without opening Cursor
+
+Usage:
+  bun cursor-commit.js [options]
+
+Options:
+  -c, --commit       Generate message from staged changes and run \`git commit -m "<msg>"\`
+  -y, --copy         Generate message and copy it to the system clipboard
+  -a, --all          Fallback to unstaged changes if no changes are staged
+  --hook <file>      Prepend generated message to a commit message file (for prepare-commit-msg hook)
+  -h, --help         Show this help message`);
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) {
+    printHelp();
+    return;
+  }
+
+  const includeUnstaged = args.includes("--all") || args.includes("-a");
+  const commitMsg = await generateCommitMessage(includeUnstaged);
+
+  const hookIdx = args.indexOf("--hook");
+  if (hookIdx !== -1 && args[hookIdx + 1]) {
+    const msgFile = args[hookIdx + 1];
+    const existing = fs.existsSync(msgFile) ? fs.readFileSync(msgFile, "utf8") : "";
+    fs.writeFileSync(msgFile, `${commitMsg}\n${existing}`, "utf8");
+    return;
+  }
+
+  if (args.includes("--copy") || args.includes("-y")) {
+    const copied = copyToClipboard(commitMsg);
+    console.log(commitMsg);
+    if (copied) {
+      console.error("\n[Copied commit message to clipboard]");
+    }
+    return;
+  }
+
+  if (args.includes("--commit") || args.includes("-c")) {
+    console.log(`Commit message:\n${commitMsg}\n`);
+    const proc = Bun.spawnSync(["git", "commit", "-m", commitMsg], {
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    process.exit(proc.exitCode ?? 0);
+  }
+
+  console.log(commitMsg);
+}
+
+main().catch((err) => {
+  console.error(`Error: ${err.message}`);
+  process.exit(1);
+});
