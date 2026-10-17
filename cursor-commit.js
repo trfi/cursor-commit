@@ -243,7 +243,7 @@ function cleanCommitExample(msg) {
     .trim();
 }
 
-function getGitContext(includeUnstagedFallback = false) {
+function getGitContext({ includeUnstagedFallback = false, noHistory = false } = {}) {
   let rawDiff = runGit(["diff", "--cached", "--patch"]);
 
   if (!rawDiff && includeUnstagedFallback) {
@@ -262,6 +262,10 @@ function getGitContext(includeUnstagedFallback = false) {
   }
 
   const diffs = splitDiffByFile(rawDiff);
+  if (noHistory) {
+    return { diffs, previousCommitMessages: [] };
+  }
+
   const logOutput = runGit(["log", "-n", "10", "--pretty=format:%B%x00"]);
   const previousCommitMessages = logOutput
     ? logOutput
@@ -291,9 +295,9 @@ function postProcessCommitMessage(msg) {
   return msg.trim();
 }
 
-async function generateCommitMessage(includeUnstagedFallback = false) {
+async function generateCommitMessage(options = {}) {
   const { dbPath, storagePath, productPath } = getPaths();
-  const { diffs, previousCommitMessages } = getGitContext(includeUnstagedFallback);
+  const { diffs, previousCommitMessages } = getGitContext(options);
 
   let machineId = crypto.randomUUID();
   let macMachineId = undefined;
@@ -377,6 +381,7 @@ Usage:
 Options:
   -c, --commit       Generate message from staged changes and run \`git commit -m "<msg>"\`
   -y, --copy         Generate message and copy it to the system clipboard
+  -n, --no-history   Do not send previous commit messages (only send explicit_context + diff)
   -a, --all          Fallback to unstaged changes if no changes are staged
   --hook <file>      Prepend generated message to a commit message file (for prepare-commit-msg hook)
   -h, --help         Show this help message`);
@@ -389,8 +394,9 @@ async function main() {
     return;
   }
 
-  const includeUnstaged = args.includes("--all") || args.includes("-a");
-  const commitMsg = await generateCommitMessage(includeUnstaged);
+  const includeUnstagedFallback = args.includes("--all") || args.includes("-a");
+  const noHistory = args.includes("--no-history") || args.includes("-n");
+  const commitMsg = await generateCommitMessage({ includeUnstagedFallback, noHistory });
 
   const hookIdx = args.indexOf("--hook");
   if (hookIdx !== -1 && args[hookIdx + 1]) {

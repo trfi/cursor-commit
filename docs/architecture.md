@@ -8,7 +8,8 @@ Cursor's "Generate Commit Message" button (`cursor.generateGitCommitMessage`) ca
 - **Staged Changes Only by Default**: Reads exclusively from `git diff --cached --patch`, splits the patch into per-file diffs (matching Cursor's `cursor-commits` extension), and ignores unstaged working-tree edits unless `--all` (`-a`) is explicitly passed.
 - **Production Commit Best-Practice Enforcement**:
   - Injects `aiserver.v1.ExplicitContext` (field `3`) instructing the model to use imperative mood, focus on technical *Why* over trivial *What*, and omit documentation filler.
-  - Sanitizes the 10 `previous_commit_messages` (`git log -n 10 --pretty=format:%B%x00`) by normalizing past-tense bullet verbs into imperative mood and stripping generic `"Updated documentation..."` lines so historical commits do not bias the few-shot prompt toward anti-patterns.
+  - Supports `--no-history` (`-n`) to omit `previous_commit_messages` completely and generate the commit message purely from `explicit_context` + `diffs`.
+  - When history is enabled (default), sanitizes the 10 `previous_commit_messages` (`git log -n 10 --pretty=format:%B%x00`) by normalizing past-tense bullet verbs into imperative mood and stripping generic `"Updated documentation..."` lines so historical commits do not bias the few-shot prompt toward anti-patterns.
 - **Offline Token Longevity**: Reads `cursorAuth/accessToken` and `cursorAuth/refreshToken` from Cursor's local `state.vscdb`. When the access token expires while Cursor is closed, the script refreshes it via `https://api2.cursor.sh/oauth/token` and persists the new token back to `state.vscdb`.
 - **Client Checksum**: Generates `x-cursor-checksum` from the current timestamp (obfuscated with rolling XOR seed `165`) and the local `telemetry.machineId` / `telemetry.macMachineId` from `storage.json`.
 

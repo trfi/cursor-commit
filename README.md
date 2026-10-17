@@ -9,6 +9,7 @@ Works with **Cursor Free** and **Cursor Pro** accounts, runs on **Bun** with zer
 - **Zero External Dependencies**: Uses Bun's built-in `bun:sqlite`, `Bun.spawnSync`, and `fetch` with a lightweight inline Protobuf encoder/decoder.
 - **Works on Free Tier**: Calls the exact internal Unary RPC used by Cursor's Source Control sparkle button (`✨ Generate Commit Message`).
 - **Staged Changes Only by Default**: Reads exclusively from `git diff --cached` and ignores unstaged edits (unless `--all` is explicitly passed) plus the last 10 commit messages to match your repository's commit style.
+- **No-History Mode (`--no-history` / `-n`)**: Skip sending `previous_commit_messages` and rely strictly on `explicit_context` + staged `diffs`.
 - **Automatic Token Refresh**: Reads `cursorAuth/accessToken` and `cursorAuth/refreshToken` from Cursor's local `state.vscdb` and refreshes expired tokens automatically even if you haven't opened Cursor in months.
 - **Cross-Platform**: Supports Windows, macOS, and Linux.
 
@@ -28,7 +29,7 @@ bun link
 Or configure global Git aliases directly:
 
 ```bash
-# Print commit message for staged changes
+# Print commit message for staged changes (with commit history context)
 git config --global alias.cc "!bun /path/to/cursor-commit/cursor-commit.js"
 
 # Generate commit message and commit staged changes immediately
@@ -36,6 +37,15 @@ git config --global alias.ccc "!bun /path/to/cursor-commit/cursor-commit.js --co
 
 # Generate commit message and copy to clipboard
 git config --global alias.ccy "!bun /path/to/cursor-commit/cursor-commit.js --copy"
+
+# Print commit message without commit history (explicit_context + diff only)
+git config --global alias.ccn "!bun /path/to/cursor-commit/cursor-commit.js --no-history"
+
+# Commit staged changes without commit history (explicit_context + diff only)
+git config --global alias.cccn "!bun /path/to/cursor-commit/cursor-commit.js --no-history --commit"
+
+# Copy commit message without commit history (explicit_context + diff only)
+git config --global alias.ccyn "!bun /path/to/cursor-commit/cursor-commit.js --no-history --copy"
 ```
 
 ## Usage
@@ -46,8 +56,14 @@ Stage your changes (`git add <files>`) and run:
 # Print generated commit message to stdout
 git cc
 
+# Print generated commit message without previous_commit_messages
+git ccn
+
 # Generate commit message and run `git commit -m "<msg>"`
 git ccc
+
+# Generate commit message (no history) and run `git commit -m "<msg>"`
+git cccn
 
 # Generate commit message and copy to clipboard
 git ccy
@@ -60,6 +76,7 @@ git ccy
 | *(none)* | Generate and print commit message for staged changes (`git diff --cached`) |
 | `-c`, `--commit` | Generate commit message and run `git commit -m "<message>"` |
 | `-y`, `--copy` | Generate commit message and copy it to the system clipboard |
+| `-n`, `--no-history` | Do not send `previous_commit_messages` (send only `explicit_context` + `diffs`) |
 | `-a`, `--all` | Fallback to unstaged changes (`git diff HEAD`) if nothing is staged |
 | `--hook <file>` | Prepend generated message into a commit message file (for `.git/hooks/prepare-commit-msg`) |
 | `-h`, `--help` | Show CLI usage |
