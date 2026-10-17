@@ -197,30 +197,37 @@ function runGit(args) {
   return proc.stdout.toString("utf8").trim();
 }
 
-function getGitContext(includeUnstagedFallback = false) {
-  let diff = runGit(["diff", "--cached", "--patch"]);
+function splitDiffByFile(rawDiff) {
+  const parts = rawDiff.split(/^(?=diff --git )/m).map((s) => s.trim()).filter(Boolean);
+  return parts.length > 0 ? parts : [rawDiff];
+}
 
-  if (!diff && includeUnstagedFallback) {
-    diff = runGit(["diff", "HEAD", "--patch"]) || runGit(["diff", "--patch"]);
+function getGitContext(includeUnstagedFallback = false) {
+  let rawDiff = runGit(["diff", "--cached", "--patch"]);
+
+  if (!rawDiff && includeUnstagedFallback) {
+    rawDiff = runGit(["diff", "HEAD", "--patch"]) || runGit(["diff", "--patch"]);
   }
 
-  if (!diff) {
+  if (!rawDiff) {
     throw new Error(
       "No staged changes found (run `git add` first, or pass `--all` to include unstaged changes)."
     );
   }
 
   const MAX_DIFF_CHARS = 120000;
-  if (diff.length > MAX_DIFF_CHARS) {
-    diff = diff.slice(0, MAX_DIFF_CHARS) + "\n... [diff truncated]";
+  if (rawDiff.length > MAX_DIFF_CHARS) {
+    rawDiff = rawDiff.slice(0, MAX_DIFF_CHARS) + "\n... [diff truncated]";
   }
 
-  const logOutput = runGit(["log", "-n", "10", "--pretty=format:%s"]);
+  // Send per-file diffs and full multi-line commit messages (%B) to match Cursor's cursor-commits extension
+  const diffs = splitDiffByFile(rawDiff);
+  const logOutput = runGit(["log", "-n", "10", "--pretty=format:%B%x00"]);
   const previousCommitMessages = logOutput
-    ? logOutput.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+    ? logOutput.split("\0").map((s) => s.trim()).filter(Boolean)
     : [];
 
-  return { diffs: [diff], previousCommitMessages };
+  return { diffs, previousCommitMessages };
 }
 
 async function generateCommitMessage(includeUnstagedFallback = false) {
