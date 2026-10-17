@@ -1,15 +1,24 @@
 # cursor-commit
 
-Generate Git commit messages from the terminal using Cursor's native **Generate Commit Message** AI (`aiserver.v1.AiService/WriteGitCommitMessage`) — **without opening the Cursor IDE**.
+Generate production-grade Git commit messages from the terminal using Cursor's native **Generate Commit Message** AI (`aiserver.v1.AiService/WriteGitCommitMessage`) — **without opening the Cursor IDE**.
 
 Works with **Cursor Free** and **Cursor Pro** accounts, runs on **Bun** with zero external `npm` dependencies, and automatically refreshes expired tokens in the background.
+
+## Built-in Commit Message Standards
+
+`cursor-commit` injects custom `ExplicitContext` instructions directly into Cursor's Protobuf RPC payload, enforcing **[Conventional Commits](https://www.conventionalcommits.org/)** combined with **[Chris Beams' 7 Rules of a Great Git Commit Message](https://cbea.ms/git-commit/) & Linux Kernel standards**:
+
+- **Imperative Mood Everywhere**: Enforces imperative verbs in both the subject line and bulleted body (`fix`, `prevent`, `propagate` — never past-tense `Updated` or `Enhanced`).
+- **The "Why" Over the "What"**: Explains root causes, architectural constraints, and technical mechanisms rather than restating obvious file diffs.
+- **Zero AI Filler**: Ruthlessly omits generic noise like *"Updated documentation to reflect changes"*.
+- **Accurate Semantic Types**: Distinguishes true user-facing features (`feat`) from bug/behavior fixes (`fix`), refactors (`refactor`), and maintenance (`chore`).
 
 ## Features
 
 - **Zero External Dependencies**: Uses Bun's built-in `bun:sqlite`, `Bun.spawnSync`, and `fetch` with a lightweight inline Protobuf encoder/decoder.
 - **Works on Free Tier**: Calls the exact internal Unary RPC used by Cursor's Source Control sparkle button (`✨ Generate Commit Message`).
 - **Staged Changes Only by Default**: Reads exclusively from `git diff --cached` and ignores unstaged edits (unless `--all` is explicitly passed) plus the last 10 commit messages to match your repository's commit style.
-- **No-History Mode (`--no-history` / `-n`)**: Skip sending `previous_commit_messages` and rely strictly on `explicit_context` + staged `diffs`.
+- **No-History Mode (`--no-history` / `-n`)**: Skip sending `previous_commit_messages` so legacy commit habits never pollute the prompt — relying strictly on best-practice rules + staged `diffs`.
 - **Automatic Token Refresh**: Reads `cursorAuth/accessToken` and `cursorAuth/refreshToken` from Cursor's local `state.vscdb` and refreshes expired tokens automatically even if you haven't opened Cursor in months.
 - **Cross-Platform**: Supports Windows, macOS, and Linux.
 
